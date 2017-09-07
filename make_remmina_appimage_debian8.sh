@@ -6,6 +6,29 @@ WORKDIR="$HOME/remmina_AppImage"
 APP=Remmina
 ENABLE_DI=yes
 
+
+# Delete blacklisted files
+loc_delete_blacklisted()
+{
+  BLACKLISTED_FILES=$(cat_file_from_url https://github.com/AppImage/AppImages/raw/master/excludelist | sed 's|#.*||g')
+  echo $BLACKLISTED_FILES
+  for FILE in $BLACKLISTED_FILES ; do
+    if [[ $FILE != libpango* ]];
+    then
+      FILES="$(find . -name "${FILE}" -not -path "./usr/optional/*")"
+      for FOUND in $FILES ; do
+        rm -vf "$FOUND" "$(readlink -f "$FOUND")"
+      done
+    fi
+  done
+
+  # Do not bundle developer stuff
+  rm -rf usr/include || true
+  rm -rf usr/lib/cmake || true
+  rm -rf usr/lib/pkgconfig || true
+  find . -name '*.la' | xargs -i rm {}
+}
+
 echo WORKDIR=$WORKDIR
 
 test -d "$WORKDIR" || mkdir "$WORKDIR"
@@ -20,6 +43,13 @@ fi
 
 cd $WORKDIR
 
+echo "################"
+echo "If running inside a container, please set it to privileged"
+echo "lxc config set guest 'security.privileged' true"
+echo "See this bug: https://github.com/systemd/systemd/issues/719"
+echo "###############"
+read -p "Press enter to continue, or ^C to abort"
+
 lastupdateage=$(( `date +%s` - `stat -L --format %Y /var/cache/apt/pkgcache.bin ` ))
 echo "Last apt update age: " $lastupdateage
 if [[ $lastupdateage -gt 7200 ]];
@@ -30,12 +60,6 @@ then
 	exit 1
 fi
 
-echo "################"
-echo "If running inside a container, please set it to privileged"
-echo "lxc config set guest 'security.privileged' true"
-echo "See this bug: https://github.com/systemd/systemd/issues/719"
-echo "###############"
-read -p "Press enter to continue, or ^C to abort"
 
 
 echo "Installing base tools"
@@ -43,7 +67,8 @@ apt -y install vim nano less wget dbus desktop-file-utils fuse gpgv2
 
 apt -y install build-essential \
 	libssh-dev cmake libx11-dev libxext-dev libxinerama-dev \
-	libxcursor-dev libxdamage-dev libxv-dev libxkbfile-dev libasound2-dev libcups2-dev libxml2 libxml2-dev \
+	libxcursor-dev libxdamage-dev libxv-dev libxkbfile-dev libasound2-dev \
+	libcups2-dev libxml2 libxml2-dev \
 	libxrandr-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
 	libxi-dev libavutil-dev \
 	libavcodec-dev libxtst-dev libgtk-3-dev libgcrypt11-dev  libpulse-dev \
@@ -81,7 +106,7 @@ then
 else
 	cd ./FreeRDP
 	git pull
-	git clean -fxd
+#	git clean -fxd
 fi
 PARAMS="-DWITH_CUPS=on -DWITH_WAYLAND=off -DWITH_PULSE=on"
 PARAMS="$PARAMS -DWITH_MANPAGES=off -DWITH_CLIENT=off -DWITH_LIBSYSTEMD=off -DWITH_OSS=OFF -DWITH_ALSA=OFF"
@@ -92,13 +117,14 @@ then
 	PARAMS="-DWITH_SSE2=ON $PARAMS"
 fi
 echo "cmake $PARAMS"
-cmake $PARAMS || (echo "cmake FreeRDP failed" && exit 1)
-make -j 2 || (echo "FreeRDP compilation failed" && exit 1)
+#cmake $PARAMS || (echo "cmake FreeRDP failed" && exit 1)
+#make -j 4 || (echo "FreeRDP compilation failed" && exit 1)
 make install || (echo "FreeRDP install failed" && exit 1)
 
 # Now build Remmina
 cd "$WORKDIR/$APP/source"
 BRANCH="next"
+BRANCH="runtimepaths"
 if [ ! -d ./Remmina ];
 then
 	git clone https://github.com/FreeRDP/Remmina.git -b "$BRANCH" || (echo "Remmina clone failed" && exit 1)
@@ -109,7 +135,12 @@ else
 	git pull
 	git clean -fxd
 fi
-PARAMS="-DCMAKE_INSTALL_PREFIX:PATH=$INSTBASE/usr -DCMAKE_PREFIX_PATH=$INSTBASE/usr --build=build ."
+PARAMS="-DCMAKE_INSTALL_PREFIX:PATH=$INSTBASE/usr -DCMAKE_PREFIX_PATH=$INSTBASE/usr "
+PARAMS="$PARAMS -D REMMINA_RUNTIME_UIDIR=./share/remmina/ui"
+PARAMS="$PARAMS -D REMMINA_RUNTIME_PLUGINDIR=./lib/remmina/plugins"
+PARAMS="$PARAMS -D REMMINA_RUNTIME_DATADIR=./share/appdata"
+PARAMS="$PARAMS -D REMMINA_RUNTIME_LOCALEDIR=./share/locale"
+PARAMS="$PARAMS --build=build ."
 cmake $PARAMS || (echo "cmake Remmina failed" && exit 1)
 make -j 2 || (echo "Remmina compilation failed" && exit 1)
 make install || (echo "Remmina install failed" && exit 1)
@@ -164,7 +195,6 @@ if [ ! -z "${_union}" ] ; then
   strip libunionpreload.so
 fi
 
-delete_blacklisted
 
 if [ "$ENABLE_DI" = "yes" ] ; then
   get_desktopintegration $LOWERAPP
@@ -178,6 +208,14 @@ sed -i -e 's|\.xpm||g' *.desktop || trueA
 
 copy_deps
 copy_deps
+
+loc_delete_blacklisted
+
+# Fix libpulseaudio position
+if [ -d "./usr/lib/x86_64-linux-gnu/pulseaudio/" ] ; then
+  mv ./usr/lib/x86_64-linux-gnu/pulseaudio/* ./usr/lib/x86_64-linux-gnu/
+  rm -r ./usr/lib/x86_64-linux-gnu/pulseaudio
+fi
 
 echo "Going out..."
 

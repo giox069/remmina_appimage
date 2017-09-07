@@ -140,6 +140,7 @@ PARAMS="$PARAMS -D REMMINA_RUNTIME_UIDIR=./share/remmina/ui"
 PARAMS="$PARAMS -D REMMINA_RUNTIME_PLUGINDIR=./lib/remmina/plugins"
 PARAMS="$PARAMS -D REMMINA_RUNTIME_DATADIR=./share/appdata"
 PARAMS="$PARAMS -D REMMINA_RUNTIME_LOCALEDIR=./share/locale"
+PARAMS="$PARAMS -D REMMINA_RUNTIME_EXTERNAL_TOOLS_DIR=./share/remmina/extenal_tools"
 PARAMS="$PARAMS --build=build ."
 cmake $PARAMS || (echo "cmake Remmina failed" && exit 1)
 make -j 2 || (echo "Remmina compilation failed" && exit 1)

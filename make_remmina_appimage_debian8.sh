@@ -106,7 +106,7 @@ then
 else
 	cd ./FreeRDP
 	git pull
-#	git clean -fxd
+	git clean -fxd
 fi
 PARAMS="-DWITH_CUPS=on -DWITH_WAYLAND=off -DWITH_PULSE=on"
 PARAMS="$PARAMS -DWITH_MANPAGES=off -DWITH_CLIENT=off -DWITH_LIBSYSTEMD=off -DWITH_OSS=OFF -DWITH_ALSA=OFF"
@@ -117,8 +117,8 @@ then
 	PARAMS="-DWITH_SSE2=ON $PARAMS"
 fi
 echo "cmake $PARAMS"
-#cmake $PARAMS || (echo "cmake FreeRDP failed" && exit 1)
-#make -j 4 || (echo "FreeRDP compilation failed" && exit 1)
+cmake $PARAMS || (echo "cmake FreeRDP failed" && exit 1)
+make -j 4 || (echo "FreeRDP compilation failed" && exit 1)
 make install || (echo "FreeRDP install failed" && exit 1)
 
 # Now build Remmina

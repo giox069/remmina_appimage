@@ -127,7 +127,6 @@ make install || (echo "FreeRDP install failed" && exit 1)
 # Now build Remmina
 cd "$WORKDIR/$APP/source"
 BRANCH="next"
-BRANCH="runtimepaths"
 if [ ! -d ./Remmina ];
 then
 	git clone https://github.com/FreeRDP/Remmina.git -b "$BRANCH" || (echo "Remmina clone failed" && exit 1)

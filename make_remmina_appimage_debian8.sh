@@ -7,27 +7,23 @@ APP=Remmina
 ENABLE_DI=yes
 
 
-# Delete blacklisted files
-loc_delete_blacklisted()
-{
-  BLACKLISTED_FILES=$(cat_file_from_url https://github.com/AppImage/AppImages/raw/master/excludelist | sed 's|#.*||g')
-  echo $BLACKLISTED_FILES
-  for FILE in $BLACKLISTED_FILES ; do
-    if [[ $FILE != libpango* ]];
-    then
-      FILES="$(find . -name "${FILE}" -not -path "./usr/optional/*")"
-      for FOUND in $FILES ; do
-        rm -vf "$FOUND" "$(readlink -f "$FOUND")"
-      done
-    fi
-  done
+for i in "$@"
+do
+case $i in
+    --skip-syspkg)
+    SKIP_SYSPKG=YES
+    shift # past argument with no value
+    ;;
+    --skip-freerdp-compilation)
+    SKIP_FREERDP_COMPILATION=YES
+    shift # past argument with no value
+    ;;
+    *)
+            # unknown option
+    ;;
+esac
+done
 
-  # Do not bundle developer stuff
-  rm -rf usr/include || true
-  rm -rf usr/lib/cmake || true
-  rm -rf usr/lib/pkgconfig || true
-  find . -name '*.la' | xargs -i rm {}
-}
 
 echo WORKDIR=$WORKDIR
 
@@ -43,41 +39,43 @@ fi
 
 cd $WORKDIR
 
-echo "################"
-echo "If running inside a container, please set it to privileged"
-echo "lxc config set guest 'security.privileged' true"
-echo "See this bug: https://github.com/systemd/systemd/issues/719"
-echo "###############"
-read -p "Press enter to continue, or ^C to abort"
-
-lastupdateage=$(( `date +%s` - `stat -L --format %Y /var/cache/apt/pkgcache.bin ` ))
-echo "Last apt update age: " $lastupdateage
-if [[ $lastupdateage -gt 7200 ]];
+if [ -z "${SKIP_SYSPKG}" ];
 then
-	apt update || exit 1
-	apt -y dist-upgrade || exit 1
-	echo "Please reboot and restart this script"
-	exit 1
+
+	echo "################"
+	echo "If running inside a container, please set it to privileged"
+	echo "lxc config set guest 'security.privileged' true"
+	echo "See this bug: https://github.com/systemd/systemd/issues/719"
+	echo "###############"
+	read -p "Press enter to continue, or ^C to abort"
+
+	lastupdateage=$(( `date +%s` - `stat -L --format %Y /var/cache/apt/pkgcache.bin ` ))
+	echo "Last apt update age: " $lastupdateage
+	if [[ $lastupdateage -gt 7200 ]];
+	then
+		apt update || exit 1
+		apt -y dist-upgrade || exit 1
+		echo "Please reboot and restart this script"
+		exit 1
+	fi
+
+	echo "Installing base tools"
+	apt -y install vim nano less wget dbus desktop-file-utils fuse gpgv2
+
+	apt -y install build-essential \
+		libssh-dev cmake libx11-dev libxext-dev libxinerama-dev \
+		libxcursor-dev libxdamage-dev libxv-dev libxkbfile-dev libasound2-dev \
+		libcups2-dev libxml2 libxml2-dev \
+		libxrandr-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+		libxi-dev libavutil-dev \
+		libavcodec-dev libxtst-dev libgtk-3-dev libgcrypt11-dev  libpulse-dev \
+		libvte-2.91-dev libxkbfile-dev libtelepathy-glib-dev libjpeg-dev \
+		libgnutls28-dev libgnome-keyring-dev libavahi-ui-gtk3-dev libvncserver-dev \
+		libappindicator3-dev intltool libsecret-1-dev libwebkit2gtk-4.0-dev libsystemd-dev \
+		wget \
+		git || (echo "Unable to install all needed packages" && exit 1)
 fi
-
-
-
-echo "Installing base tools"
-apt -y install vim nano less wget dbus desktop-file-utils fuse gpgv2
-
-apt -y install build-essential \
-	libssh-dev cmake libx11-dev libxext-dev libxinerama-dev \
-	libxcursor-dev libxdamage-dev libxv-dev libxkbfile-dev libasound2-dev \
-	libcups2-dev libxml2 libxml2-dev \
-	libxrandr-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-	libxi-dev libavutil-dev \
-	libavcodec-dev libxtst-dev libgtk-3-dev libgcrypt11-dev  libpulse-dev \
-	libvte-2.91-dev libxkbfile-dev libtelepathy-glib-dev libjpeg-dev \
-	libgnutls28-dev libgnome-keyring-dev libavahi-ui-gtk3-dev libvncserver-dev \
-	libappindicator3-dev intltool libsecret-1-dev libwebkit2gtk-4.0-dev libsystemd-dev \
-	wget \
-	git || (echo "Unable to install all needed packages" && exit 1)
-
+	
 # Inspiration: https://github.com/probonopd/AppImages/blob/master/recipes/meta/Recipe
 LOWERAPP=${APP,,}
 
@@ -98,27 +96,32 @@ cd "$WORKDIR/$APP/source"
 ARCH=`uname -m`
 
 
-# Now build FreeRDP
-if [ ! -d ./FreeRDP ];
+if [ -z "${SKIP_FREERDP_COMPILATION}" ];
 then
-	git clone https://github.com/FreeRDP/FreeRDP.git || (echo "FreeRDP clone failed" && exit 1)
-	cd ./FreeRDP
+	# Now build FreeRDP
+	if [ ! -d ./FreeRDP ];
+	then
+		git clone https://github.com/FreeRDP/FreeRDP.git || (echo "FreeRDP clone failed" && exit 1)
+		cd ./FreeRDP
+	else
+		cd ./FreeRDP
+		git pull
+		git clean -fxd
+	fi
+	PARAMS="-DWITH_CUPS=on -DWITH_WAYLAND=off -DWITH_PULSE=on"
+	PARAMS="$PARAMS -DWITH_MANPAGES=off -DWITH_CLIENT=off -DWITH_LIBSYSTEMD=off -DWITH_OSS=OFF -DWITH_ALSA=OFF"
+	PARAMS="$PARAMS -DCMAKE_INSTALL_PREFIX:PATH=$INSTBASE/usr ."
+	echo $ARCH
+	if [[ "$ARCH" == i?86 || $ARCH == x86_64 ]];
+	then	
+		PARAMS="-DWITH_SSE2=ON $PARAMS"
+	fi
+	echo "cmake $PARAMS"
+	cmake $PARAMS || (echo "cmake FreeRDP failed" && exit 1)
+	make -j 4 || (echo "FreeRDP compilation failed" && exit 1)
 else
-	cd ./FreeRDP
-	git pull
-	git clean -fxd
+	cd ./FreeRDP || (echo "Unable to chdir into FreeRDP dir" && exit 1)
 fi
-PARAMS="-DWITH_CUPS=on -DWITH_WAYLAND=off -DWITH_PULSE=on"
-PARAMS="$PARAMS -DWITH_MANPAGES=off -DWITH_CLIENT=off -DWITH_LIBSYSTEMD=off -DWITH_OSS=OFF -DWITH_ALSA=OFF"
-PARAMS="$PARAMS -DCMAKE_INSTALL_PREFIX:PATH=$INSTBASE/usr ."
-echo $ARCH
-if [[ "$ARCH" == i?86 || $ARCH == x86_64 ]];
-then
-	PARAMS="-DWITH_SSE2=ON $PARAMS"
-fi
-echo "cmake $PARAMS"
-cmake $PARAMS || (echo "cmake FreeRDP failed" && exit 1)
-make -j 4 || (echo "FreeRDP compilation failed" && exit 1)
 make install || (echo "FreeRDP install failed" && exit 1)
 
 # Now build Remmina
@@ -140,7 +143,7 @@ PARAMS="$PARAMS -D REMMINA_RUNTIME_UIDIR=./share/remmina/ui"
 PARAMS="$PARAMS -D REMMINA_RUNTIME_PLUGINDIR=./lib/remmina/plugins"
 PARAMS="$PARAMS -D REMMINA_RUNTIME_DATADIR=./share/appdata"
 PARAMS="$PARAMS -D REMMINA_RUNTIME_LOCALEDIR=./share/locale"
-PARAMS="$PARAMS -D REMMINA_RUNTIME_EXTERNAL_TOOLS_DIR=./share/remmina/extenal_tools"
+PARAMS="$PARAMS -D REMMINA_RUNTIME_EXTERNAL_TOOLS_DIR=./share/remmina/external_tools"
 PARAMS="$PARAMS --build=build ."
 cmake $PARAMS || (echo "cmake Remmina failed" && exit 1)
 make -j 2 || (echo "Remmina compilation failed" && exit 1)
@@ -210,7 +213,11 @@ sed -i -e 's|\.xpm||g' *.desktop || trueA
 copy_deps
 copy_deps
 
-loc_delete_blacklisted
+delete_blacklisted
+
+# Workaround https://github.com/AppImage/AppImageKit/issues/454
+echo "Removing libharfbuzz..."
+find usr/ -name "libharfbuzz*" -exec rm {} \;
 
 # Fix libpulseaudio position
 if [ -d "./usr/lib/x86_64-linux-gnu/pulseaudio/" ] ; then

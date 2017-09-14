@@ -2,10 +2,14 @@
 
 # Make AppImage for remmina
 
-WORKDIR="$HOME/remmina_AppImage"
+WORKDIR="$HOME/remmina_AppImage_workdir"
 APP=Remmina
 ENABLE_DI=yes
 
+abort() { echo "$*" ; exit 1; }
+
+# Saves the script execution dir
+SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 for i in "$@"
 do
@@ -28,13 +32,12 @@ done
 echo WORKDIR=$WORKDIR
 
 test -d "$WORKDIR" || mkdir "$WORKDIR"
-test -d "$WORKDIR" || (echo "Cannot create $WORKDIR directory" && exit 1)
+test -d "$WORKDIR" || abort "Cannot create $WORKDIR directory"
 
 IFS='.' read DEBIAN_VERSION DEBIAN_VERSION_MINOR < /etc/debian_version
 if [ "$DEBIAN_VERSION" != "8" ];
 then
-	echo "Debian 8 is required, but $DEBIAN_VERSION.$DEBIAN_VERSION_MINOR found."
-	exit 1
+	abort "Debian 8 is required, but $DEBIAN_VERSION.$DEBIAN_VERSION_MINOR found."
 fi
 
 cd $WORKDIR
@@ -53,8 +56,8 @@ then
 	echo "Last apt update age: " $lastupdateage
 	if [[ $lastupdateage -gt 7200 ]];
 	then
-		apt update || exit 1
-		apt -y dist-upgrade || exit 1
+		apt update || abort "apt update failed"
+		apt -y dist-upgrade || abort "dist-upgrade failed"
 		echo "Please reboot and restart this script"
 		exit 1
 	fi
@@ -72,8 +75,9 @@ then
 		libvte-2.91-dev libxkbfile-dev libtelepathy-glib-dev libjpeg-dev \
 		libgnutls28-dev libgnome-keyring-dev libavahi-ui-gtk3-dev libvncserver-dev \
 		libappindicator3-dev intltool libsecret-1-dev libwebkit2gtk-4.0-dev libsystemd-dev \
+		gnome-themes-standard-data \
 		wget \
-		git || (echo "Unable to install all needed packages" && exit 1)
+		git || abort "Unable to install all needed packages"
 fi
 	
 # Inspiration: https://github.com/probonopd/AppImages/blob/master/recipes/meta/Recipe
@@ -101,7 +105,7 @@ then
 	# Now build FreeRDP
 	if [ ! -d ./FreeRDP ];
 	then
-		git clone https://github.com/FreeRDP/FreeRDP.git || (echo "FreeRDP clone failed" && exit 1)
+		git clone https://github.com/FreeRDP/FreeRDP.git || abort "FreeRDP clone failed"
 		cd ./FreeRDP
 	else
 		cd ./FreeRDP
@@ -117,19 +121,19 @@ then
 		PARAMS="-DWITH_SSE2=ON $PARAMS"
 	fi
 	echo "cmake $PARAMS"
-	cmake $PARAMS || (echo "cmake FreeRDP failed" && exit 1)
-	make -j 4 || (echo "FreeRDP compilation failed" && exit 1)
+	cmake $PARAMS || abort "cmake FreeRDP failed"
+	make -j 4 || abort "FreeRDP compilation failed"
 else
-	cd ./FreeRDP || (echo "Unable to chdir into FreeRDP dir" && exit 1)
+	cd ./FreeRDP || abort "Unable to chdir into FreeRDP dir"
 fi
-make install || (echo "FreeRDP install failed" && exit 1)
+make install || abort "FreeRDP install failed"
 
 # Now build Remmina
 cd "$WORKDIR/$APP/source"
 BRANCH="next"
 if [ ! -d ./Remmina ];
 then
-	git clone https://github.com/FreeRDP/Remmina.git -b "$BRANCH" || (echo "Remmina clone failed" && exit 1)
+	git clone https://github.com/FreeRDP/Remmina.git -b "$BRANCH" || abort "Remmina clone failed"
 	cd ./Remmina
 else
 	cd ./Remmina
@@ -144,15 +148,15 @@ PARAMS="$PARAMS -D REMMINA_RUNTIME_DATADIR=./share/appdata"
 PARAMS="$PARAMS -D REMMINA_RUNTIME_LOCALEDIR=./share/locale"
 PARAMS="$PARAMS -D REMMINA_RUNTIME_EXTERNAL_TOOLS_DIR=./share/remmina/external_tools"
 PARAMS="$PARAMS --build=build ."
-cmake $PARAMS || (echo "cmake Remmina failed" && exit 1)
-make -j 2 || (echo "Remmina compilation failed" && exit 1)
-make install || (echo "Remmina install failed" && exit 1)
+cmake $PARAMS || abort "cmake Remmina failed"
+make -j 2 || abort "Remmina compilation failed"
+make install || abort "Remmina install failed"
 
 # Get version from config.h
-test -f config.h || (echo "config.h not found after compiling remmina" && exit 1)
+test -f config.h || abort "config.h not found after compiling remmina"
 VERSION=`sed -n '/#define VERSION/s/^.\+\"\(.\+\)\"/\1/p' < config.h`
 VERSION=${VERSION//-/_}
-test -z $VERSION && (echo "Unable to find version inside config.h" && exit 1)
+test -z $VERSION && abort "Unable to find version inside config.h"
 GITREV=`sed -n '/#define REMMINA_GIT_REVISION/s/^.\+\"\(.\+\)\"/\1/p' < config.h`
 VERSION="${VERSION}_$GITREV"
 
@@ -166,13 +170,13 @@ cd "$INSTBASE"
 # Copy main desktop icon
 cp "usr/share/icons/hicolor/scalable/apps/remmina.svg" .
 
-get_apprun
-
+# .desktop file
 get_desktop
+
 
 DESKTOP=$(find . -name '*.desktop' | sort | head -n 1)
 echo "DESKTOP file found in $DESKTOP"
-test -z "$DESKTOP" && (echo "Desktop file not found, aborting" || exit 1)
+test -z "$DESKTOP" && abort "Desktop file not found, aborting"
 
 fix_desktop "$DESKTOP"
 
@@ -183,10 +187,10 @@ sed -i -e 's|'"${ORIG}"'|Exec='"${REPL}"'|g' "${DESKTOP}"
 
 # patch_usr
 # Patching only the executable files seems not to be enough for some apps
-if [ ! -z "${_binpatch}" ] ; then
-  find usr/ -type f -exec sed -i -e 's|/usr|././|g' {} \;
-  find usr/ -type f -exec sed -i -e 's@././/bin/env@/usr/bin/env@g' {} \;
-fi
+#if [ ! -z "${_binpatch}" ] ; then
+#  find usr/ -type f -exec sed -i -e 's|/usr|././|g' {} \;
+#  find usr/ -type f -exec sed -i -e 's@././/bin/env@/usr/bin/env@g' {} \;
+#fi
 
 # Don't suffer from NIH; use LD_PRELOAD to override calls to /usr paths
 if [ ! -z "${_union}" ] ; then
@@ -209,14 +213,113 @@ sed -i -e 's|\.svg||g' *.desktop || true
 sed -i -e 's|\.svgz||g' *.desktop || true
 sed -i -e 's|\.xpm||g' *.desktop || trueA
 
+# Copy all icons which are listed in remmina_global_icons.lst
+ICONLISTFILE="$SCRIPTDIR/remmina_global_icons.lst"
+ICON_THEME=$(gsettings get org.gnome.desktop.interface icon-theme)
+GLOBAL_ICONPATH=/usr/share/icons/${ICON_THEME:1:-1}
+
+[ -f $ICONLISTFILE ] || abort "Unable to find $ICONLISTFILE"
+for i in `cat $ICONLISTFILE;`
+do
+	ICLIST=`find $GLOBAL_ICONPATH -name "$i.*"`
+	for ic in $ICLIST;
+	do
+		RELPATH=${ic##${GLOBAL_ICONPATH}}
+		DESTDIR="./usr/share/icons/hicolor/$(dirname "${RELPATH}")"
+		[ -d "$DESTDIR" ] || mkdir -p "$DESTDIR"
+		[ -d "$DESTDIR" ] || abort "Cannot create $DESTDIR"
+		cp "$ic" "$DESTDIR" || abort "Cannot copy file to $DESTDIR"
+	done
+done
+
+GDKPIXBUFQUERYLOADERS=$(type -path gdk-pixbuf-query-loaders)
+cp "$GDKPIXBUFQUERYLOADERS" ./usr/bin || abort "Unable to copy gdk-pixbuf-query-loaders executable"
+
+# Copy GDK pixbuf loaders in our environment
+LOADERS=`gdk-pixbuf-query-loaders | grep "/libpix.\+so" | sed -e 's/^"//' -e 's/"$//'`
+for loader in $LOADERS;
+do
+	LOADERSDIR=$(dirname "${loader}")
+	[ -d ".${LOADERSDIR}" ] || mkdir -p ".$LOADERSDIR"
+	cp "$loader" ".${LOADERSDIR}" || abort "Unable to copy file"
+done
+echo "Loadersdir: $LOADERSDIR"
+[ -d "${LOADERSDIR}" ] || abort "Cannot find gdk pixbuf loaders dir"
+
+# Regenerate loaders.cache
+export GDK_PIXBUF_MODULEDIR="${INSTBASE}${LOADERSDIR}"
+export GDK_PIXBUF_MODULE_FILE="${INSTBASE}/${LOADERSDIR}/loaders.cache"
+echo GDK_PIXBUF_MODULEDIR=$GDK_PIXBUF_MODULEDIR
+echo GDK_PIXBUF_MODULE_FILE=$GDK_PIXBUF_MODULE_FILE
+gdk-pixbuf-query-loaders --update-cache || abord "Unable to regenerate GDK puxbuf loaders cache"
+unset GDK_PIXBUF_MODULEDIR
+unset GDK_PIXBUF_MODULE_FILE
+
+# Copy the Adwaita theme, from package gnome-themes-standard-data
+DESTDIR=./usr/share/themes
+[ -d "$DESTDIR" ] || mkdir -p "$DESTDIR"
+[ -d "$DESTDIR" ] || abort "Cannot create $DESTDIR"
+cp -axv /usr/share/themes/Adwaita "$DESTDIR"
+
+# Generate APPRUNS
+# No, the standard AppRun is not for us
+### get_apprun
+cat > AppRun <<\EOF
+#!/bin/sh
+HERE="$(dirname "$(readlink -f "${0}")")"
+EOF
+cat >> AppRun <<EOF
+export GDK_PIXBUF_MODULE_FILE="\${HERE}${LOADERSDIR}/loaders.cache"
+export GDK_PIXBUF_MODULEDIR="\${HERE}${LOADERSDIR}"
+EOF
+
+cat >> AppRun <<\EOF
+export PATH="${HERE}"/usr/bin/:"${HERE}"/usr/sbin/:"${HERE}"/bin/:"${PATH}"
+export LD_LIBRARY_PATH="${HERE}"/usr/lib/:"${HERE}"/usr/lib/i386-linux-gnu/:"${HERE}"/usr/lib/x86_64-linux-gnu/:"${HERE}"/usr/lib32/:"${HERE}"/usr/lib64/:"${HERE}"/lib/:"${HERE}"/lib/i386-linux-gnu/:"${HERE}"/lib/x86_64-linux-gnu/:"${HERE}"/lib32/:"${HERE}"/lib64/:"${LD_LIBRARY_PATH}"
+export PYTHONPATH="${HERE}"/usr/share/pyshared/:"${PYTHONPATH}"
+export PYTHONHOME="${HERE}"/usr/
+export XDG_DATA_DIRS="${HERE}"/usr/share/:"${XDG_DATA_DIRS}"
+export PERLLIB="${HERE}"/usr/share/perl5/:"${HERE}"/usr/lib/perl5/:"${PERLLIB}"
+export GSETTINGS_SCHEMA_DIR="${HERE}"/usr/share/glib-2.0/schemas/:"${GSETTINGS_SCHEMA_DIR}"
+export GTK_THEME=Adwaita
+export GTK_PATH=${HERE}/lib/gtk-3.0
+export GST_PLUGIN_SCANNER=${HERE}/libexec/gstreamer-1.0/gst-plugin-scanner
+export GTK_DATA_PREFIX=${HERE}
+
+EXEC=$(grep -e '^Exec=.*' "${HERE}"/*.desktop | head -n 1 | cut -d "=" -f 2- | sed -e 's|%.||g')
+echo "----"
+echo Current dir is $PWD and HERE=$HERE
+cd "${HERE}/usr"
+echo Current dir is now $PWD
+echo executing ${EXEC}
+exec ${EXEC} $@
+EOF
+
+chmod a+x AppRun
+
 copy_deps
 copy_deps
 
-delete_blacklisted
+# Delete blacklisted files
+BLACKLISTEDSOLIST="$SCRIPTDIR/blacklisted_so.lst"
+BLACKLISTED_FILES=$(cat "$BLACKLISTEDSOLIST" | sed 's|#.*||g')
+echo $BLACKLISTED_FILES
+for FILE in $BLACKLISTED_FILES ; do
+	FILES="$(find . -name "${FILE}" -not -path "./usr/optional/*")"
+	for FOUND in $FILES ; do
+		rm -vf "$FOUND" "$(readlink -f "$FOUND")"
+	done
+done
+
+# Do not bundle developer stuff
+rm -rf usr/include || true
+rm -rf usr/lib/cmake || true
+rm -rf usr/lib/pkgconfig || true
+find . -name '*.la' | xargs -i rm {}
 
 # Workaround https://github.com/AppImage/AppImageKit/issues/454
-echo "Removing libharfbuzz..."
-find usr/ -name "libharfbuzz*" -exec rm {} \;
+#echo "Removing libharfbuzz..."
+#find usr/ -name "libharfbuzz*" -exec rm {} \;
 
 # Fix libpulseaudio position
 if [ -d "./usr/lib/x86_64-linux-gnu/pulseaudio/" ] ; then
@@ -232,6 +335,4 @@ pwd
 
 generate_type2_appimage
 ls -lh ../out/*.AppImage
-
-
-
+XBUF_MODULE_FILE=e

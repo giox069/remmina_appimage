@@ -21,6 +21,7 @@ gtk-cancel
 gtk-connect
 help-about
 help-contents
+image-missing
 list-add
 list-remove
 open-menu-symbolic
